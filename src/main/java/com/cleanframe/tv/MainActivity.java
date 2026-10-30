@@ -1,0 +1,325 @@
+package com.cleanframe.tv;
+
+import android.app.Activity;
+import android.content.ComponentName;
+import android.content.Context;
+import android.content.Intent;
+import android.content.pm.ActivityInfo;
+import android.content.pm.PackageManager;
+import android.content.pm.ResolveInfo;
+import android.graphics.Color;
+import android.graphics.Outline;
+import android.graphics.Typeface;
+import android.graphics.drawable.Drawable;
+import android.graphics.drawable.GradientDrawable;
+import android.media.tv.TvContract;
+import android.media.tv.TvInputInfo;
+import android.media.tv.TvInputManager;
+import android.net.Uri;
+import android.os.Bundle;
+import android.provider.Settings;
+import android.text.TextUtils;
+import android.view.Gravity;
+import android.view.View;
+import android.view.ViewGroup;
+import android.view.ViewOutlineProvider;
+import android.widget.FrameLayout;
+import android.widget.HorizontalScrollView;
+import android.widget.ImageView;
+import android.widget.LinearLayout;
+import android.widget.ScrollView;
+import android.widget.TextClock;
+import android.widget.TextView;
+import android.widget.Toast;
+
+import java.util.ArrayList;
+import java.util.Collections;
+import java.util.LinkedHashMap;
+import java.util.List;
+import java.util.Locale;
+import java.util.Map;
+
+public class MainActivity extends Activity {
+
+    // {nom affiche, mot-cle de recherche, paquet1, paquet2...}
+    private static final String[][] FAVS = {
+        {"YouTube", "youtube", "com.google.android.youtube.tv"},
+        {"Netflix", "netflix", "com.netflix.ninja"},
+        {"TCL Channel", "tcl channel", "com.tcl.tclchannel"},
+        {"Disney+", "disney", "com.disney.disneyplus"},
+        {"Prime Video", "prime video", "com.amazon.amazonvideo.livingroom", "com.amazon.avod.thirdpartyclient"},
+        {"Play Store", "play store", "com.android.vending"},
+    };
+
+    private static final int MATCH = ViewGroup.LayoutParams.MATCH_PARENT;
+    private static final int WRAP = ViewGroup.LayoutParams.WRAP_CONTENT;
+
+    private PackageManager pm;
+    private float density;
+    private LinearLayout col;
+    private View firstTile;
+    private List<ResolveInfo> apps = new ArrayList<>();
+
+    @Override
+    protected void onCreate(Bundle b) {
+        super.onCreate(b);
+        pm = getPackageManager();
+        density = getResources().getDisplayMetrics().density;
+
+        FrameLayout root = new FrameLayout(this);
+        root.setBackground(new GradientDrawable(GradientDrawable.Orientation.TL_BR,
+                new int[]{0xFF07070D, 0xFF16162B, 0xFF2B1A44}));
+
+        ScrollView sv = new ScrollView(this);
+        sv.setVerticalScrollBarEnabled(false);
+        sv.setClipChildren(false);
+
+        col = new LinearLayout(this);
+        col.setOrientation(LinearLayout.VERTICAL);
+        col.setClipChildren(false);
+        col.setPadding(dp(56), dp(32), dp(56), dp(40));
+
+        sv.addView(col, new ViewGroup.LayoutParams(MATCH, WRAP));
+        root.addView(sv, new FrameLayout.LayoutParams(MATCH, MATCH));
+        setContentView(root);
+    }
+
+    @Override
+    protected void onResume() {
+        super.onResume();
+        build();
+    }
+
+    @Override
+    public void onBackPressed() {
+        // Ecran d'accueil : on ne quitte pas.
+    }
+
+    private void build() {
+        col.removeAllViews();
+        firstTile = null;
+        apps = allApps();
+
+        LinearLayout head = new LinearLayout(this);
+        head.setGravity(Gravity.CENTER_VERTICAL);
+        head.addView(label("Cleanframe", 34, Color.WHITE, true), new LinearLayout.LayoutParams(0, WRAP, 1f));
+        TextClock clock = new TextClock(this);
+        clock.setFormat24Hour("HH:mm");
+        clock.setFormat12Hour("HH:mm");
+        clock.setTextSize(28);
+        clock.setTextColor(0xCCFFFFFF);
+        head.addView(clock);
+        col.addView(head);
+
+        LinearLayout r1 = section("Applications");
+        for (String[] f : FAVS) addFav(r1, f);
+        r1.addView(textTile("Réglages", "Réglages", () -> launch(new Intent(Settings.ACTION_SETTINGS)), false));
+
+        LinearLayout r2 = section("Entrées");
+        int n = 0;
+        try {
+            TvInputManager tim = (TvInputManager) getSystemService(Context.TV_INPUT_SERVICE);
+            if (tim != null) {
+                for (TvInputInfo info : tim.getTvInputList()) {
+                    if (info.getType() == TvInputInfo.TYPE_HDMI) {
+                        final String id = info.getId();
+                        CharSequence l = info.loadCustomLabel(this);
+                        if (l == null || l.length() == 0) l = info.loadLabel(this);
+                        String name = l == null ? "HDMI" : l.toString();
+                        r2.addView(textTile(name, "HDMI", () -> launch(new Intent(Intent.ACTION_VIEW,
+                                TvContract.buildChannelUriForPassthroughInput(id))), false));
+                        n++;
+                    }
+                }
+            }
+        } catch (Exception ignored) {
+        }
+        if (n == 0) {
+            r2.addView(textTile("HDMI", "Aucune entrée détectée",
+                    () -> Toast.makeText(this, "Aucune entrée HDMI détectée", Toast.LENGTH_SHORT).show(), true));
+        }
+
+        LinearLayout r3 = section("Toutes les applis");
+        for (ResolveInfo r : apps) {
+            final ActivityInfo ai = r.activityInfo;
+            final Intent in = intentFor(ai);
+            r3.addView(iconTile(r.loadLabel(pm).toString(), ai, false, () -> launch(in)));
+        }
+
+        final View ft = firstTile;
+        if (ft != null) ft.post(() -> ft.requestFocus());
+    }
+
+    private void addFav(LinearLayout row, String[] f) {
+        Intent in = null;
+        ActivityInfo ai = null;
+        for (int i = 2; i < f.length && ai == null; i++) {
+            Intent c = pm.getLeanbackLaunchIntentForPackage(f[i]);
+            if (c == null) c = pm.getLaunchIntentForPackage(f[i]);
+            if (c != null) {
+                ActivityInfo a = c.resolveActivityInfo(pm, 0);
+                if (a != null) {
+                    ai = a;
+                    in = c;
+                }
+            }
+        }
+        if (ai == null) {
+            for (ResolveInfo r : apps) {
+                if (r.loadLabel(pm).toString().toLowerCase(Locale.ROOT).contains(f[1])) {
+                    ai = r.activityInfo;
+                    in = intentFor(ai);
+                    break;
+                }
+            }
+        }
+        if (ai != null) {
+            final Intent fin = in;
+            row.addView(iconTile(f[0], ai, false, () -> launch(fin)));
+        } else {
+            final String pkg = f[2];
+            row.addView(textTile(f[0], "Non installé",
+                    () -> launch(new Intent(Intent.ACTION_VIEW, Uri.parse("market://details?id=" + pkg))), true));
+        }
+    }
+
+    private List<ResolveInfo> allApps() {
+        Map<String, ResolveInfo> m = new LinkedHashMap<>();
+        String[] cats = {Intent.CATEGORY_LEANBACK_LAUNCHER, Intent.CATEGORY_LAUNCHER};
+        for (String cat : cats) {
+            Intent q = new Intent(Intent.ACTION_MAIN).addCategory(cat);
+            for (ResolveInfo r : pm.queryIntentActivities(q, 0)) {
+                String p = r.activityInfo.packageName;
+                if (p.equals(getPackageName())) continue;
+                if (!m.containsKey(p)) m.put(p, r);
+            }
+        }
+        List<ResolveInfo> l = new ArrayList<>(m.values());
+        Collections.sort(l, (a, c) -> a.loadLabel(pm).toString().compareToIgnoreCase(c.loadLabel(pm).toString()));
+        return l;
+    }
+
+    private Intent intentFor(ActivityInfo ai) {
+        Intent in = new Intent(Intent.ACTION_MAIN);
+        in.setComponent(new ComponentName(ai.packageName, ai.name));
+        return in;
+    }
+
+    private void launch(Intent i) {
+        try {
+            i.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
+            startActivity(i);
+        } catch (Exception e) {
+            Toast.makeText(this, "Impossible d'ouvrir", Toast.LENGTH_SHORT).show();
+        }
+    }
+
+    private LinearLayout section(String title) {
+        TextView t = label(title, 22, 0xB3FFFFFF, true);
+        t.setPadding(dp(8), dp(28), 0, dp(4));
+        col.addView(t);
+
+        HorizontalScrollView hs = new HorizontalScrollView(this);
+        hs.setHorizontalScrollBarEnabled(false);
+        hs.setClipChildren(false);
+        hs.setClipToPadding(false);
+        hs.setPadding(0, dp(18), 0, dp(18));
+
+        LinearLayout row = new LinearLayout(this);
+        row.setOrientation(LinearLayout.HORIZONTAL);
+        row.setClipChildren(false);
+        row.setPadding(dp(8), 0, dp(8), 0);
+        hs.addView(row);
+        col.addView(hs, new LinearLayout.LayoutParams(MATCH, WRAP));
+        return row;
+    }
+
+    private View iconTile(String name, ActivityInfo ai, boolean dim, Runnable action) {
+        Drawable d = ai.loadBanner(pm);
+        boolean banner = d != null;
+        if (d == null) d = ai.loadIcon(pm);
+        ImageView iv = new ImageView(this);
+        iv.setImageDrawable(d);
+        FrameLayout.LayoutParams lp;
+        if (banner) {
+            iv.setScaleType(ImageView.ScaleType.CENTER_CROP);
+            lp = new FrameLayout.LayoutParams(MATCH, MATCH);
+        } else {
+            iv.setScaleType(ImageView.ScaleType.FIT_CENTER);
+            lp = new FrameLayout.LayoutParams(dp(88), dp(88), Gravity.CENTER);
+        }
+        iv.setLayoutParams(lp);
+        return tile(name, iv, dim, action);
+    }
+
+    private View textTile(String big, String caption, Runnable action, boolean dim) {
+        TextView tv = label(big, 30, Color.WHITE, true);
+        tv.setGravity(Gravity.CENTER);
+        tv.setLayoutParams(new FrameLayout.LayoutParams(MATCH, MATCH));
+        return tile(caption, tv, dim, action);
+    }
+
+    private View tile(String caption, View content, boolean dim, final Runnable action) {
+        final LinearLayout wrap = new LinearLayout(this);
+        wrap.setOrientation(LinearLayout.VERTICAL);
+        wrap.setFocusable(true);
+        wrap.setClickable(true);
+
+        final FrameLayout card = new FrameLayout(this);
+        card.setBackground(cardBg(false));
+        card.setClipToOutline(true);
+        card.setOutlineProvider(new ViewOutlineProvider() {
+            @Override
+            public void getOutline(View v, Outline o) {
+                o.setRoundRect(0, 0, v.getWidth(), v.getHeight(), dp(18));
+            }
+        });
+        card.addView(content);
+        if (dim) card.setAlpha(0.45f);
+        wrap.addView(card, new LinearLayout.LayoutParams(dp(260), dp(146)));
+
+        final TextView cap = label(caption, 18, 0xB3FFFFFF, false);
+        cap.setGravity(Gravity.CENTER);
+        cap.setSingleLine(true);
+        cap.setEllipsize(TextUtils.TruncateAt.END);
+        cap.setPadding(0, dp(12), 0, 0);
+        wrap.addView(cap, new LinearLayout.LayoutParams(dp(260), WRAP));
+
+        LinearLayout.LayoutParams lp = new LinearLayout.LayoutParams(WRAP, WRAP);
+        lp.setMargins(dp(12), 0, dp(12), 0);
+        wrap.setLayoutParams(lp);
+
+        wrap.setOnClickListener(v -> action.run());
+        wrap.setOnFocusChangeListener((v, has) -> {
+            card.setBackground(cardBg(has));
+            cap.setTextColor(has ? Color.WHITE : 0xB3FFFFFF);
+            float s = has ? 1.1f : 1f;
+            wrap.animate().scaleX(s).scaleY(s).setDuration(140).start();
+            wrap.setTranslationZ(has ? dp(12) : 0);
+        });
+
+        if (firstTile == null) firstTile = wrap;
+        return wrap;
+    }
+
+    private GradientDrawable cardBg(boolean focused) {
+        GradientDrawable g = new GradientDrawable();
+        g.setCornerRadius(dp(18));
+        g.setColor(focused ? 0x40FFFFFF : 0x1FFFFFFF);
+        if (focused) g.setStroke(dp(3), Color.WHITE);
+        return g;
+    }
+
+    private TextView label(String text, int sp, int color, boolean bold) {
+        TextView tv = new TextView(this);
+        tv.setText(text);
+        tv.setTextSize(sp);
+        tv.setTextColor(color);
+        if (bold) tv.setTypeface(Typeface.DEFAULT_BOLD);
+        return tv;
+    }
+
+    private int dp(int v) {
+        return (int) (v * density + 0.5f);
+    }
+}
