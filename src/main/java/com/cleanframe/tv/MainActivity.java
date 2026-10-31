@@ -258,7 +258,7 @@ public class MainActivity extends Activity {
         hs.setFillViewport(true);
         hs.setClipChildren(false);
         hs.setClipToPadding(false);
-        hs.setPadding(0, dp(14), 0, dp(14));
+        hs.setPadding(0, dp(4), 0, dp(4));
 
         LinearLayout row = new LinearLayout(this);
         row.setOrientation(LinearLayout.HORIZONTAL);
@@ -303,6 +303,10 @@ public class MainActivity extends Activity {
         wrap.setOrientation(LinearLayout.VERTICAL);
         wrap.setFocusable(true);
         wrap.setClickable(true);
+        // Marge interne : la tuile grossit sans etre coupee
+        wrap.setPadding(dp(12), dp(12), dp(12), dp(12));
+        wrap.setClipChildren(false);
+        wrap.setClipToPadding(false);
 
         final FrameLayout card = new FrameLayout(this);
         card.setBackground(cardBg(false));
@@ -326,14 +330,14 @@ public class MainActivity extends Activity {
         wrap.addView(cap, new LinearLayout.LayoutParams(dp(wDp), WRAP));
 
         LinearLayout.LayoutParams lp = new LinearLayout.LayoutParams(WRAP, WRAP);
-        lp.setMargins(dp(10), 0, dp(10), 0);
+        lp.setMargins(dp(2), 0, dp(2), 0);
         wrap.setLayoutParams(lp);
 
         wrap.setOnClickListener(v -> action.run());
         wrap.setOnFocusChangeListener((v, has) -> {
             card.setBackground(cardBg(has));
             cap.setTextColor(has ? Color.WHITE : 0xCCFFFFFF);
-            float s = has ? 1.12f : 1f;
+            float s = has ? 1.1f : 1f;
             wrap.animate().scaleX(s).scaleY(s).setDuration(140).start();
             wrap.setTranslationZ(has ? dp(12) : 0);
         });
