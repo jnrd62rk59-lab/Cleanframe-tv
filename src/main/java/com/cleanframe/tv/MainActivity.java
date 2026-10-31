@@ -4,6 +4,7 @@ import android.app.Activity;
 import android.content.ComponentName;
 import android.content.Context;
 import android.content.Intent;
+import android.content.SharedPreferences;
 import android.content.pm.ActivityInfo;
 import android.content.pm.PackageManager;
 import android.content.pm.ResolveInfo;
@@ -11,7 +12,6 @@ import android.graphics.Bitmap;
 import android.graphics.Canvas;
 import android.graphics.Color;
 import android.graphics.LinearGradient;
-import android.graphics.Outline;
 import android.graphics.Paint;
 import android.graphics.Path;
 import android.graphics.Shader;
@@ -44,6 +44,7 @@ import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
+import java.util.Random;
 
 public class MainActivity extends Activity {
 
@@ -61,6 +62,8 @@ public class MainActivity extends Activity {
     private static final int WRAP = ViewGroup.LayoutParams.WRAP_CONTENT;
 
     private PackageManager pm;
+    private SharedPreferences prefs;
+    private Wallpaper wallpaper;
     private float density;
     private LinearLayout col;
     private View firstTile;
@@ -70,10 +73,13 @@ public class MainActivity extends Activity {
     protected void onCreate(Bundle b) {
         super.onCreate(b);
         pm = getPackageManager();
+        prefs = getSharedPreferences("cf", MODE_PRIVATE);
         density = getResources().getDisplayMetrics().density;
 
         FrameLayout root = new FrameLayout(this);
-        root.addView(new Wallpaper(this), new FrameLayout.LayoutParams(MATCH, MATCH));
+        wallpaper = new Wallpaper(this);
+        wallpaper.setTheme(prefs.getInt("wp", 0));
+        root.addView(wallpaper, new FrameLayout.LayoutParams(MATCH, MATCH));
 
         ScrollView sv = new ScrollView(this);
         sv.setVerticalScrollBarEnabled(false);
@@ -108,6 +114,9 @@ public class MainActivity extends Activity {
 
         int screenH = getResources().getDisplayMetrics().heightPixels;
 
+        FrameLayout topFrame = new FrameLayout(this);
+        topFrame.setClipChildren(false);
+
         // Date + grande heure, centrees en haut
         LinearLayout top = new LinearLayout(this);
         top.setOrientation(LinearLayout.VERTICAL);
@@ -133,7 +142,14 @@ public class MainActivity extends Activity {
         clock.setShadowLayer(dp(8), 0, dp(2), 0x55000000);
         top.addView(clock);
 
-        col.addView(top, new LinearLayout.LayoutParams(MATCH, (int) (screenH * 0.40f)));
+        topFrame.addView(top, new FrameLayout.LayoutParams(MATCH, MATCH));
+
+        // Petit logo en haut a droite : change le fond d'ecran
+        FrameLayout.LayoutParams blp = new FrameLayout.LayoutParams(dp(56), dp(56), Gravity.TOP | Gravity.END);
+        blp.setMargins(0, dp(28), dp(12), 0);
+        topFrame.addView(wallpaperButton(), blp);
+
+        col.addView(topFrame, new LinearLayout.LayoutParams(MATCH, (int) (screenH * 0.40f)));
 
         // Rangee 1 : grosses tuiles
         LinearLayout r1 = centerRow();
@@ -181,6 +197,35 @@ public class MainActivity extends Activity {
 
         final View ft = firstTile;
         if (ft != null) ft.post(() -> ft.requestFocus());
+    }
+
+    // Bouton rond en haut a droite : passe au fond d'ecran suivant
+    private View wallpaperButton() {
+        final FrameLayout b = new FrameLayout(this);
+        b.setFocusable(true);
+        b.setClickable(true);
+        b.setBackground(buttonBg(false));
+        b.addView(new Logo(this), new FrameLayout.LayoutParams(MATCH, MATCH));
+        b.setOnClickListener(v -> {
+            int next = (wallpaper.getTheme() + 1) % Wallpaper.count();
+            wallpaper.setTheme(next);
+            prefs.edit().putInt("wp", next).apply();
+            Toast.makeText(this, "Fond d'écran : " + Wallpaper.name(next), Toast.LENGTH_SHORT).show();
+        });
+        b.setOnFocusChangeListener((v, has) -> {
+            b.setBackground(buttonBg(has));
+            float s = has ? 1.15f : 1f;
+            b.animate().scaleX(s).scaleY(s).setDuration(140).start();
+        });
+        return b;
+    }
+
+    private GradientDrawable buttonBg(boolean focused) {
+        GradientDrawable g = new GradientDrawable();
+        g.setCornerRadius(dp(16));
+        g.setColor(focused ? 0x66FFFFFF : 0x44FFFFFF);
+        if (focused) g.setStroke(dp(3), Color.WHITE);
+        return g;
     }
 
     private void addFav(LinearLayout row, String[] f) {
@@ -367,8 +412,49 @@ public class MainActivity extends Activity {
         return (int) (v * density + 0.5f);
     }
 
-    // Fond : montagnes + lac avec reflet, dessine par le code
+    // Petit logo (montagnes + soleil) dessine par le code
+    private static class Logo extends View {
+        private final Paint p = new Paint(Paint.ANTI_ALIAS_FLAG);
+
+        Logo(Context c) {
+            super(c);
+        }
+
+        @Override
+        protected void onDraw(Canvas canvas) {
+            float w = getWidth();
+            float h = getHeight();
+            p.setColor(0xF2FFFFFF);
+            canvas.drawCircle(0.70f * w, 0.30f * h, 0.085f * w, p);
+            Path a = new Path();
+            a.moveTo(0.18f * w, 0.74f * h);
+            a.lineTo(0.42f * w, 0.36f * h);
+            a.lineTo(0.64f * w, 0.74f * h);
+            a.close();
+            canvas.drawPath(a, p);
+            p.setColor(0xCCFFFFFF);
+            Path b = new Path();
+            b.moveTo(0.48f * w, 0.74f * h);
+            b.lineTo(0.68f * w, 0.50f * h);
+            b.lineTo(0.84f * w, 0.74f * h);
+            b.close();
+            canvas.drawPath(b, p);
+        }
+    }
+
+    // Fond : montagnes + lac avec reflet, dessine par le code, plusieurs ambiances
     private static class Wallpaper extends View {
+        private static final String[] NAMES = {"Lac", "Coucher de soleil", "Nuit", "Brume rose", "Forêt"};
+
+        // ciel haut, ciel bas, lointain, montagne, neige, droite, collines, brume, eau haut, eau bas, etoiles
+        private static final int[][] T = {
+            {0xFFA6D8DC, 0xFF6FB1B8, 0xFF9CCBD0, 0xFF5F9FA7, 0xAAEAF6F6, 0xFF78B0B6, 0xFF4A8A90, 0x99DDF1F2, 0x22FFFFFF, 0xDD06222A, 0},
+            {0xFF3B2A6B, 0xFFF29A5B, 0xFFC9708A, 0xFF7A3F6B, 0xAAFFD9B5, 0xFF9A5476, 0xFF4A2A55, 0x99FFC9A0, 0x22FFFFFF, 0xDD1A0B24, 0},
+            {0xFF050816, 0xFF1B2A55, 0xFF223566, 0xFF16224A, 0x88B8C8F0, 0xFF1C2B5A, 0xFF0C1330, 0x553A4F8A, 0x11FFFFFF, 0xEE02040C, 1},
+            {0xFF6C7FD8, 0xFFF5B7C8, 0xFFC3A7D8, 0xFF8D86C9, 0xAAFFFFFF, 0xFFA897D2, 0xFF5E5AA0, 0x99FFE3EE, 0x22FFFFFF, 0xDD1A1738, 0},
+            {0xFFBFE3C8, 0xFF7FB89A, 0xFF8FC1A3, 0xFF3F7F63, 0x88EFFFF4, 0xFF58977A, 0xFF1F4F3E, 0x99DFF5E7, 0x22FFFFFF, 0xDD052018, 0},
+        };
+
         private static final float[] FAR = {0, .62f, .10f, .48f, .18f, .56f, .28f, .40f, .40f, .52f,
                 .55f, .34f, .66f, .48f, .78f, .38f, .90f, .50f, 1, .46f, 1, 1, 0, 1};
         private static final float[] MAIN = {.10f, 1, .22f, .66f, .29f, .52f, .345f, .30f, .375f, .20f,
@@ -379,8 +465,9 @@ public class MainActivity extends Activity {
         private static final float[] HILLS = {0, .86f, .12f, .80f, .30f, .90f, .48f, .95f, .70f, .90f,
                 .88f, .82f, 1, .86f, 1, 1, 0, 1};
 
+        private int theme;
+        private int vw, vh, horizon;
         private Bitmap scene;
-        private int horizon;
         private final Paint p = new Paint(Paint.ANTI_ALIAS_FLAG);
         private final Paint water = new Paint();
 
@@ -388,26 +475,60 @@ public class MainActivity extends Activity {
             super(c);
         }
 
+        static int count() {
+            return T.length;
+        }
+
+        static String name(int i) {
+            return NAMES[i];
+        }
+
+        int getTheme() {
+            return theme;
+        }
+
+        void setTheme(int t) {
+            theme = ((t % T.length) + T.length) % T.length;
+            render();
+            invalidate();
+        }
+
         @Override
         protected void onSizeChanged(int w, int h, int ow, int oh) {
-            if (w <= 0 || h <= 0) return;
+            vw = w;
+            vh = h;
             horizon = h / 2;
-            scene = Bitmap.createBitmap(w, horizon, Bitmap.Config.ARGB_8888);
+            render();
+        }
+
+        private void render() {
+            if (vw <= 0 || vh <= 0) return;
+            int[] t = T[theme];
+            scene = Bitmap.createBitmap(vw, horizon, Bitmap.Config.ARGB_8888);
             Canvas c = new Canvas(scene);
             Paint sp = new Paint(Paint.ANTI_ALIAS_FLAG);
-            sp.setShader(new LinearGradient(0, 0, 0, horizon, 0xFFA6D8DC, 0xFF6FB1B8, Shader.TileMode.CLAMP));
-            c.drawRect(0, 0, w, horizon, sp);
+            sp.setShader(new LinearGradient(0, 0, 0, horizon, t[0], t[1], Shader.TileMode.CLAMP));
+            c.drawRect(0, 0, vw, horizon, sp);
             sp.setShader(null);
-            poly(c, sp, 0xFF9CCBD0, w, horizon, FAR);
-            poly(c, sp, 0xFF5F9FA7, w, horizon, MAIN);
-            poly(c, sp, 0xAAEAF6F6, w, horizon, SNOW);
-            poly(c, sp, 0xFF78B0B6, w, horizon, RIGHT);
-            poly(c, sp, 0xFF4A8A90, w, horizon, HILLS);
-            sp.setShader(new LinearGradient(0, horizon * 0.6f, 0, horizon, 0x00FFFFFF, 0x99DDF1F2,
+            if (t[10] == 1) {
+                Random r = new Random(7);
+                for (int i = 0; i < 110; i++) {
+                    float x = r.nextFloat() * vw;
+                    float y = r.nextFloat() * horizon * 0.7f;
+                    sp.setColor(Color.argb(120 + r.nextInt(120), 255, 255, 255));
+                    c.drawCircle(x, y, 1f + r.nextFloat() * 1.6f, sp);
+                }
+            }
+            poly(c, sp, t[2], vw, horizon, FAR);
+            poly(c, sp, t[3], vw, horizon, MAIN);
+            poly(c, sp, t[4], vw, horizon, SNOW);
+            poly(c, sp, t[5], vw, horizon, RIGHT);
+            poly(c, sp, t[6], vw, horizon, HILLS);
+            sp.setShader(new LinearGradient(0, horizon * 0.6f, 0, horizon, t[7] & 0x00FFFFFF, t[7],
                     Shader.TileMode.CLAMP));
-            c.drawRect(0, horizon * 0.6f, w, horizon, sp);
+            c.drawRect(0, horizon * 0.6f, vw, horizon, sp);
 
-            water.setShader(new LinearGradient(0, horizon, 0, h, 0x22FFFFFF, 0xDD06222A, Shader.TileMode.CLAMP));
+            water.setShader(new LinearGradient(0, horizon, 0, vh, t[8], t[9], Shader.TileMode.CLAMP));
         }
 
         private void poly(Canvas c, Paint sp, int color, int w, int h, float[] pts) {
