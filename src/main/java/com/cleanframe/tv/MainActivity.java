@@ -30,6 +30,7 @@ import android.view.View;
 import android.view.ViewGroup;
 import android.view.ViewOutlineProvider;
 import android.widget.FrameLayout;
+import android.widget.GridLayout;
 import android.widget.HorizontalScrollView;
 import android.widget.ImageView;
 import android.widget.LinearLayout;
@@ -67,6 +68,10 @@ public class MainActivity extends Activity {
     private float density;
     private LinearLayout col;
     private View firstTile;
+    private FrameLayout root;
+    private ScrollView sv;
+    private View overlay;
+    private View allAppsTile;
     private List<ResolveInfo> apps = new ArrayList<>();
 
     @Override
@@ -76,12 +81,12 @@ public class MainActivity extends Activity {
         prefs = getSharedPreferences("cf", MODE_PRIVATE);
         density = getResources().getDisplayMetrics().density;
 
-        FrameLayout root = new FrameLayout(this);
+        root = new FrameLayout(this);
         wallpaper = new Wallpaper(this);
         wallpaper.setTheme(prefs.getInt("wp", 0));
         root.addView(wallpaper, new FrameLayout.LayoutParams(MATCH, MATCH));
 
-        ScrollView sv = new ScrollView(this);
+        sv = new ScrollView(this);
         sv.setVerticalScrollBarEnabled(false);
         sv.setClipChildren(false);
         sv.setFillViewport(true);
@@ -89,7 +94,7 @@ public class MainActivity extends Activity {
         col = new LinearLayout(this);
         col.setOrientation(LinearLayout.VERTICAL);
         col.setClipChildren(false);
-        col.setPadding(dp(40), 0, dp(40), dp(40));
+        col.setPadding(dp(20), 0, dp(20), dp(40));
 
         sv.addView(col, new ViewGroup.LayoutParams(MATCH, WRAP));
         root.addView(sv, new FrameLayout.LayoutParams(MATCH, MATCH));
@@ -104,7 +109,8 @@ public class MainActivity extends Activity {
 
     @Override
     public void onBackPressed() {
-        // Ecran d'accueil : on ne quitte pas.
+        // Ecran d'accueil : on ne quitte pas, on ferme seulement la liste des applis.
+        if (overlay != null) closeAllApps();
     }
 
     private void build() {
@@ -149,7 +155,7 @@ public class MainActivity extends Activity {
         blp.setMargins(0, dp(28), dp(12), 0);
         topFrame.addView(wallpaperButton(), blp);
 
-        col.addView(topFrame, new LinearLayout.LayoutParams(MATCH, (int) (screenH * 0.40f)));
+        col.addView(topFrame, new LinearLayout.LayoutParams(MATCH, (int) (screenH * 0.46f)));
 
         // Rangee 1 : grosses tuiles
         LinearLayout r1 = centerRow();
@@ -182,18 +188,10 @@ public class MainActivity extends Activity {
         r2.addView(smallTextTile("Réglages", "Réglages",
                 () -> launch(new Intent(Settings.ACTION_SETTINGS)), false));
 
-        // Rangee 3 : toutes les applis
-        TextView t = label("Toutes les applis", 18, 0xE6FFFFFF, true);
-        t.setShadowLayer(dp(4), 0, dp(1), 0x66000000);
-        t.setPadding(dp(8), dp(28), 0, 0);
-        col.addView(t);
-
+        // Rangee 3 : une seule tuile qui ouvre toutes les applis
         LinearLayout r3 = centerRow();
-        for (ResolveInfo r : apps) {
-            final ActivityInfo ai = r.activityInfo;
-            final Intent in = intentFor(ai);
-            r3.addView(iconTile(r.loadLabel(pm).toString(), ai, false, () -> launch(in), 132, 74, 13));
-        }
+        allAppsTile = tile("Toutes les applis", new GridIcon(this), false, () -> openAllApps(), 124, 70, 13);
+        r3.addView(allAppsTile);
 
         final View ft = firstTile;
         if (ft != null) ft.post(() -> ft.requestFocus());
@@ -253,15 +251,15 @@ public class MainActivity extends Activity {
         }
         if (ai != null) {
             final Intent fin = in;
-            row.addView(iconTile(f[0], ai, false, () -> launch(fin), 172, 98, 15));
+            row.addView(iconTile(f[0], ai, false, () -> launch(fin), 124, 70, 13));
         } else {
             final String pkg = f[2];
-            TextView tv = label(f[0], 22, Color.WHITE, true);
+            TextView tv = label(f[0], 16, Color.WHITE, true);
             tv.setGravity(Gravity.CENTER);
             tv.setLayoutParams(new FrameLayout.LayoutParams(MATCH, MATCH));
             row.addView(tile("Non installé", tv, true,
                     () -> launch(new Intent(Intent.ACTION_VIEW, Uri.parse("market://details?id=" + pkg))),
-                    172, 98, 15));
+                    124, 70, 13));
         }
     }
 
@@ -325,6 +323,10 @@ public class MainActivity extends Activity {
         if (banner) {
             iv.setScaleType(ImageView.ScaleType.CENTER_CROP);
             lp = new FrameLayout.LayoutParams(MATCH, MATCH);
+            lp.setMargins(dp(6), dp(6), dp(6), dp(6));
+            iv.setClipToOutline(true);
+            iv.setOutlineProvider(rounded(dp(10)));
+            iv.setAlpha(0.95f);
         } else {
             iv.setScaleType(ImageView.ScaleType.FIT_CENTER);
             lp = new FrameLayout.LayoutParams(dp(h * 6 / 10), dp(h * 6 / 10), Gravity.CENTER);
@@ -340,7 +342,7 @@ public class MainActivity extends Activity {
         tv.setEllipsize(TextUtils.TruncateAt.END);
         tv.setPadding(dp(8), 0, dp(8), 0);
         tv.setLayoutParams(new FrameLayout.LayoutParams(MATCH, MATCH));
-        return tile(caption, tv, dim, action, 140, 64, 13);
+        return tile(caption, tv, dim, action, 124, 58, 13);
     }
 
     private View tile(String caption, View content, boolean dim, final Runnable action, int wDp, int hDp, int capSp) {
@@ -349,19 +351,14 @@ public class MainActivity extends Activity {
         wrap.setFocusable(true);
         wrap.setClickable(true);
         // Marge interne : la tuile grossit sans etre coupee
-        wrap.setPadding(dp(12), dp(12), dp(12), dp(12));
+        wrap.setPadding(dp(10), dp(10), dp(10), dp(10));
         wrap.setClipChildren(false);
         wrap.setClipToPadding(false);
 
         final FrameLayout card = new FrameLayout(this);
         card.setBackground(cardBg(false));
         card.setClipToOutline(true);
-        card.setOutlineProvider(new ViewOutlineProvider() {
-            @Override
-            public void getOutline(View v, android.graphics.Outline o) {
-                o.setRoundRect(0, 0, v.getWidth(), v.getHeight(), dp(16));
-            }
-        });
+        card.setOutlineProvider(rounded(dp(16)));
         card.addView(content);
         if (dim) card.setAlpha(0.5f);
         wrap.addView(card, new LinearLayout.LayoutParams(dp(wDp), dp(hDp)));
@@ -394,9 +391,71 @@ public class MainActivity extends Activity {
     private GradientDrawable cardBg(boolean focused) {
         GradientDrawable g = new GradientDrawable();
         g.setCornerRadius(dp(16));
-        g.setColor(focused ? 0x66FFFFFF : 0x44FFFFFF);
+        g.setColor(focused ? 0x59FFFFFF : 0x30FFFFFF);
         if (focused) g.setStroke(dp(3), Color.WHITE);
+        else g.setStroke(dp(1), 0x55FFFFFF);
         return g;
+    }
+
+    private ViewOutlineProvider rounded(final int r) {
+        return new ViewOutlineProvider() {
+            @Override
+            public void getOutline(View v, android.graphics.Outline o) {
+                o.setRoundRect(0, 0, v.getWidth(), v.getHeight(), r);
+            }
+        };
+    }
+
+    // Liste complete des applis, affichee par-dessus l'accueil
+    private void openAllApps() {
+        if (overlay != null) return;
+        FrameLayout ov = new FrameLayout(this);
+        ov.setBackgroundColor(0xEE070B14);
+        ov.setClickable(true);
+
+        LinearLayout box = new LinearLayout(this);
+        box.setOrientation(LinearLayout.VERTICAL);
+        box.setPadding(dp(20), dp(24), dp(20), dp(8));
+        box.setClipChildren(false);
+
+        TextView title = label("Toutes les applis", 26, Color.WHITE, true);
+        title.setPadding(dp(10), 0, 0, dp(8));
+        box.addView(title);
+
+        ScrollView s2 = new ScrollView(this);
+        s2.setVerticalScrollBarEnabled(false);
+        s2.setClipChildren(false);
+        s2.setClipToPadding(false);
+        final GridLayout g = new GridLayout(this);
+        g.setColumnCount(6);
+        g.setClipChildren(false);
+        for (ResolveInfo r : apps) {
+            final ActivityInfo ai = r.activityInfo;
+            final Intent in = intentFor(ai);
+            g.addView(iconTile(r.loadLabel(pm).toString(), ai, false, () -> {
+                closeAllApps();
+                launch(in);
+            }, 124, 70, 12));
+        }
+        s2.addView(g, new ViewGroup.LayoutParams(MATCH, WRAP));
+        box.addView(s2, new LinearLayout.LayoutParams(MATCH, 0, 1f));
+
+        ov.addView(box, new FrameLayout.LayoutParams(MATCH, MATCH));
+        root.addView(ov, new FrameLayout.LayoutParams(MATCH, MATCH));
+        overlay = ov;
+        sv.setDescendantFocusability(ViewGroup.FOCUS_BLOCK_DESCENDANTS);
+        g.post(() -> {
+            View c = g.getChildAt(0);
+            if (c != null) c.requestFocus();
+        });
+    }
+
+    private void closeAllApps() {
+        if (overlay == null) return;
+        root.removeView(overlay);
+        overlay = null;
+        sv.setDescendantFocusability(ViewGroup.FOCUS_AFTER_DESCENDANTS);
+        if (allAppsTile != null) allAppsTile.requestFocus();
     }
 
     private TextView label(String text, int sp, int color, boolean bold) {
@@ -410,6 +469,34 @@ public class MainActivity extends Activity {
 
     private int dp(int v) {
         return (int) (v * density + 0.5f);
+    }
+
+    // Icone "grille" (9 carres) pour la tuile Toutes les applis
+    private static class GridIcon extends View {
+        private final Paint p = new Paint(Paint.ANTI_ALIAS_FLAG);
+
+        GridIcon(Context c) {
+            super(c);
+        }
+
+        @Override
+        protected void onDraw(Canvas canvas) {
+            float w = getWidth();
+            float h = getHeight();
+            float s = Math.min(w, h) * 0.17f;
+            float gap = s * 0.35f;
+            float total = 3 * s + 2 * gap;
+            float x0 = (w - total) / 2f;
+            float y0 = (h - total) / 2f;
+            p.setColor(0xE6FFFFFF);
+            for (int i = 0; i < 3; i++) {
+                for (int j = 0; j < 3; j++) {
+                    float x = x0 + i * (s + gap);
+                    float y = y0 + j * (s + gap);
+                    canvas.drawRoundRect(x, y, x + s, y + s, s * 0.25f, s * 0.25f, p);
+                }
+            }
+        }
     }
 
     // Petit logo (montagnes + soleil) dessine par le code
